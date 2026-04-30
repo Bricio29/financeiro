@@ -7,11 +7,19 @@ import {
   Link as LinkIcon,
   MessageCircle,
   FileSignature,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
-import { createClient } from "@/src/utils/supabase/client";
+import { createClient } from "@/src/utils/supabase/client"; // Ajustado para o seu path atual
+import { gerarContratoDocx } from "@/src/utils/gerar-contrato"; // Importando a função de geração
 
-export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
+export function ContractModal({
+  cliente,
+  isOpen,
+  onClose,
+  onRefresh,
+  onEdit,
+}: any) {
   if (!cliente) return null;
   const supabase = createClient();
 
@@ -32,25 +40,54 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
   const handleSendWhatsApp = () => {
     if (!cliente.telefone)
       return toast.error("Cliente sem telefone cadastrado.");
+
     const num = cliente.telefone.replace(/\D/g, "");
+    // Note: Em uma fase futura, o [LINK_AQUI] pode ser substituído por uma URL do Supabase Storage
     const msg = encodeURIComponent(
       `Olá ${cliente.responsavel || cliente.nome}, segue o link para análise e assinatura do nosso contrato de prestação de serviços ChatClean: [LINK_AQUI]`,
     );
     window.open(`https://wa.me/55${num}?text=${msg}`, "_blank");
   };
 
-  // Função para simular a assinatura/geração e atualizar o banco
-  const handleGerarContrato = async () => {
+  // Função para atualizar o status no banco e marcar que o contrato foi gerado
+  const handleAtualizarStatus = async () => {
+    const novoStatus =
+      cliente.status_contrato === "assinado" ? "aguardando" : "assinado";
+
     const { error } = await supabase
       .from("clientes")
-      .update({ status_contrato: "assinado", contrato_gerado: true })
+      .update({
+        status_contrato: novoStatus,
+        contrato_gerado: true,
+      })
       .eq("id", cliente.id);
 
     if (error) {
       toast.error("Erro ao atualizar status do contrato.");
     } else {
-      toast.success("Status atualizado para Assinado!");
+      toast.success(
+        `Status atualizado para ${novoStatus === "assinado" ? "Assinado" : "Aguardando"}!`,
+      );
       if (onRefresh) onRefresh();
+    }
+  };
+
+  // Função disparada ao clicar em Baixar
+  const handleDownload = async () => {
+    const loadingToast = toast.loading("Gerando documento...");
+    try {
+      await gerarContratoDocx(cliente);
+      toast.success("Contrato gerado com sucesso!", { id: loadingToast });
+
+      // Opcional: Marcar no banco que o contrato foi baixado/gerado
+      await supabase
+        .from("clientes")
+        .update({ contrato_gerado: true })
+        .eq("id", cliente.id);
+
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      toast.error("Erro ao gerar o arquivo .docx", { id: loadingToast });
     }
   };
 
@@ -61,7 +98,7 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
           <DialogTitle>Contrato de {cliente.nome}</DialogTitle>
         </div>
 
-        {/* Header do Modal */}
+        {/* Header do Modal com Ações */}
         <div className="flex justify-between items-center mb-4 shrink-0">
           <div>
             <h2 className="text-xl font-bold text-white tracking-wide">
@@ -69,7 +106,11 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
             </h2>
             <div className="flex gap-2 mt-1">
               <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${cliente.status_contrato === "assinado" ? "bg-[#00d68f]/20 text-[#00d68f]" : "bg-amber-500/20 text-amber-400"}`}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                  cliente.status_contrato === "assinado"
+                    ? "bg-[#00d68f]/20 text-[#00d68f]"
+                    : "bg-amber-500/20 text-amber-400"
+                }`}
               >
                 {cliente.status_contrato === "assinado"
                   ? "✅ Assinado"
@@ -78,36 +119,53 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {/* Botão Editar - Adicionado conforme solicitado */}
             <Button
-              onClick={handleGerarContrato}
+              onClick={() => {
+                onClose(); // Fecha o modal do contrato
+                if (onEdit) onEdit(cliente); // Abre o formulário de edição
+              }}
+              variant="secondary"
+              className="bg-slate-800 hover:bg-slate-700 text-xs h-8 text-orange-400"
+            >
+              <Pencil className="w-3.5 h-3.5 mr-2" /> Editar Dados
+            </Button>
+
+            <Button
+              onClick={handleAtualizarStatus}
               variant="secondary"
               className="bg-slate-800 hover:bg-slate-700 text-xs h-8"
             >
               <FileSignature className="w-3.5 h-3.5 mr-2 text-blue-400" />{" "}
               Alterar Status
             </Button>
+
             <Button
               variant="secondary"
               className="bg-slate-800 hover:bg-slate-700 text-xs h-8"
             >
               <LinkIcon className="w-3.5 h-3.5 mr-2 text-slate-400" /> Link
-              Assinatura
             </Button>
+
             <Button
               onClick={handleSendWhatsApp}
               className="bg-[#00d68f]/10 text-[#00d68f] hover:bg-[#00d68f]/20 text-xs h-8"
             >
               <MessageCircle className="w-3.5 h-3.5 mr-2" /> Enviar
             </Button>
-            <Button className="bg-[#00d68f] hover:bg-[#00b87a] text-slate-950 font-bold text-xs h-8">
-              <Download className="w-3.5 h-3.5 mr-2" /> Baixar
+
+            <Button
+              onClick={handleDownload}
+              className="bg-[#00d68f] hover:bg-[#00b87a] text-slate-950 font-bold text-xs h-8"
+            >
+              <Download className="w-3.5 h-3.5 mr-2" /> Baixar .DOCX
             </Button>
           </div>
         </div>
 
-        {/* Documento Estilo "Folha de Papel" */}
-        <div className="bg-white text-slate-900 flex-1 overflow-y-auto p-8 md:p-12 rounded-sm shadow-xl font-serif text-sm leading-relaxed custom-scrollbar">
+        {/* Visualização do Documento (Estilo Folha de Papel) */}
+        <div className="bg-white text-slate-900 flex-1 overflow-y-auto p-8 md:p-12 rounded-sm shadow-xl font-serif text-sm leading-relaxed custom-scrollbar selection:bg-emerald-100">
           <h1 className="text-center font-bold text-lg mb-6 uppercase">
             CONTRATO DE LICENCIAMENTO E PRESTAÇÃO DE SERVIÇO DE USO DE
             PLATAFORMA DE SOFTWARE, AUTO ATENDIMENTO, CHATBOT.
@@ -131,12 +189,12 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
             {cliente.cnpj || "________________"}, com sede em{" "}
             {cliente.endereco || "________________"}, doravante denominado
             CONTRATANTE e neste ato representada na forma de seus atos
-            constitutivos, por seu representante legal{" "}
+            constitivos, por seu representante legal{" "}
             {cliente.responsavel || "________________"}, inscrito no CPF sob o
             nº {cliente.cpf || "________________"}.
           </p>
 
-          <h3 className="font-bold mb-2">DO OBJETO DO CONTRATO</h3>
+          <h3 className="font-bold mb-2 uppercase">Do Objeto do Contrato</h3>
           <p className="mb-4 text-justify">
             <strong>Cláusula 1ª.</strong> O presente contrato tem por objeto o
             licenciamento de uso, implantação e prestação de serviços da
@@ -152,8 +210,8 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
             além do uso aqui licenciado.
           </p>
 
-          <h3 className="font-bold mb-2">
-            DO LICENCIAMENTO, FUNCIONAMENTO E ACESSOS
+          <h3 className="font-bold mb-2 uppercase">
+            Do Licenciamento, Funcionamento e Acessos
           </h3>
           <p className="mb-2 text-justify">
             <strong>Cláusula 5ª.</strong> O plano contratado inclui:
@@ -165,27 +223,30 @@ export function ContractModal({ cliente, isOpen, onClose, onRefresh }: any) {
           </ul>
 
           <p className="mb-6 text-justify">
-            <strong>Cláusula 7-A.</strong> Do Valor da Implementação: A
-            CONTRATANTE pagará à CONTRATADA o valor único de{" "}
+            <strong>Cláusula 7-A.</strong>{" "}
+            <strong>Do Valor da Implementação:</strong> A CONTRATANTE pagará à
+            CONTRATADA o valor único de{" "}
             {formatarMoeda(cliente.valor_implementacao)} referente à
             implementação inicial da plataforma ChatClean.
           </p>
 
-          <div className="mt-16 text-center">
+          <div className="mt-20 text-center">
             <p>Natal/RN, {dataAtual}.</p>
 
             <div className="flex justify-between mt-16 px-10">
               <div className="text-center w-[40%]">
                 <div className="border-t border-slate-900 w-full mb-2"></div>
-                <p className="font-bold uppercase text-xs">{cliente.nome}</p>
-                <p className="text-[10px]">CONTRATANTE</p>
+                <p className="font-bold uppercase text-[10px]">
+                  {cliente.nome}
+                </p>
+                <p className="text-[9px]">CONTRATANTE</p>
               </div>
               <div className="text-center w-[40%]">
                 <div className="border-t border-slate-900 w-full mb-2"></div>
-                <p className="font-bold uppercase text-xs">
+                <p className="font-bold uppercase text-[10px]">
                   VALE NEGÓCIOS LTDA
                 </p>
-                <p className="text-[10px]">CONTRATADA</p>
+                <p className="text-[9px]">CONTRATADA</p>
               </div>
             </div>
           </div>
